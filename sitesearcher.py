@@ -99,6 +99,8 @@ class SiteSearcher:
             sys.stdout = open(os.devnull, 'w')
 
         site = self.args.site
+        if not site.startswith(('http://', 'https://')):
+            site = 'https://' + site
         if site.startswith('http://'):
             self.warning(f"The site '{site}' uses unencrypted HTTP.")
 
@@ -142,11 +144,31 @@ class SiteSearcher:
         ext = os.path.splitext(path)[1]
         return ext in BINARY_EXTENSIONS, ext
 
+    def re_flags(self):
+        return re.IGNORECASE if self.args.ignore_case else 0
+
+    def url_matches_sitepattern(self, url):
+        if not self.args.sitepattern:
+            return True
+        pattern = self.args.sitepattern
+        negate = False
+        if pattern.startswith('!'):
+            negate = True
+            pattern = pattern[1:]
+        regex = self.phrase_to_regex(pattern)
+        result = bool(re.search(regex, url, self.re_flags()))
+        return not result if negate else result
+
     def crawl(self, url, depth, base_domain):
         if url in self.visited_urls:
             return
 
         self.visited_urls.add(url)
+
+        if not self.url_matches_sitepattern(url):
+            if self.args.debug:
+                self.info(f"Skipping URL (sitepattern mismatch): {url}")
+            return
 
         is_binary, ext = self.is_binary_url(url)
 
@@ -213,22 +235,40 @@ class SiteSearcher:
 
     def search_in_content(self, content, url):
         phrase = self.args.text
+        negate = False
+        if phrase.startswith('!'):
+            negate = True
+            phrase = phrase[1:]
+
         regex_pattern = self.phrase_to_regex(phrase)
+        flags = self.re_flags()
 
         lines = content.split('\n')
         found_in_page = False
 
-        for line_num, line in enumerate(lines, 1):
-            for match in re.finditer(regex_pattern, line, re.IGNORECASE):
-                char_pos = match.start() + 1
-                matched_text = match.group(0)
-                self.results.append((url, line_num, char_pos, matched_text))
-                self.total_matches += 1
-                self.files_with_matches.add(url)
+        if negate or self.args.invert:
+            for line_num, line in enumerate(lines, 1):
+                if not re.search(regex_pattern, line, flags):
+                    matched_text = line.strip()[:80]
+                    self.results.append((url, line_num, 0, matched_text))
+                    self.total_matches += 1
+                    self.files_with_matches.add(url)
 
-                result_line = f"{url}, LINE:{line_num}, COL:{char_pos} -> '{matched_text}'"
-                print(self.c(result_line, Colors.GREEN))
-                found_in_page = True
+                    result_line = f"{url}, LINE:{line_num}, COL:0 -> '{matched_text}'"
+                    print(self.c(result_line, Colors.GREEN))
+                    found_in_page = True
+        else:
+            for line_num, line in enumerate(lines, 1):
+                for match in re.finditer(regex_pattern, line, flags):
+                    char_pos = match.start() + 1
+                    matched_text = match.group(0)
+                    self.results.append((url, line_num, char_pos, matched_text))
+                    self.total_matches += 1
+                    self.files_with_matches.add(url)
+
+                    result_line = f"{url}, LINE:{line_num}, COL:{char_pos} -> '{matched_text}'"
+                    print(self.c(result_line, Colors.GREEN))
+                    found_in_page = True
 
     def search_in_image(self, url):
         if not HAS_PIL or not HAS_TESSERACT:
@@ -322,6 +362,9 @@ def create_parser():
     parser.add_argument('--debug', action='store_true', help='Show debug messages (skipped files, errors)')
     parser.add_argument('--binsearch', action='store_true', help='Also search inside binary files')
     parser.add_argument('--imgsearch', action='store_true', help='Also search for phrase in images (OCR)')
+    parser.add_argument('--sitepattern', type=str, help='URL pattern filter (* and ? wildcards)')
+    parser.add_argument('--invert', action='store_true', help='Invert text search (show non-matching lines)')
+    parser.add_argument('-i', '--ignore-case', action='store_true', dest='ignore_case', help='Case-insensitive search')
     parser.add_argument('-q', '--quiet', action='store_true', help='Suppress all console output (requires -w)')
     parser.add_argument('-h', action='store_true', dest='simple_help', help='Show simple help')
     parser.add_argument('--help', action='store_true', dest='detailed_help', help='Show detailed help with examples')
@@ -345,6 +388,9 @@ def show_simple_help():
     print("  --debug          Show debug messages")
     print("  --binsearch      Also search inside binary files")
     print("  --imgsearch      Also search for phrase in images (OCR)")
+    print("  --sitepattern    URL pattern filter (*, ? wildcards)")
+    print("  --invert         Invert text search (show non-matching lines)")
+    print("  -i, --ignore-case Case-insensitive search")
     print("  -q, --quiet      Suppress all console output (requires -w)")
     print("  -h               Show this help")
     print("  --help           Show detailed help with examples")
@@ -394,6 +440,15 @@ def show_detailed_help():
     print()
     print("  --imgsearch      Also search for the phrase inside images using OCR.")
     print("                   Requires: pip install pytesseract Pillow")
+    print()
+    print("  --sitepattern    Filter pages by URL pattern. Supports * and ?")
+    print("                   wildcards (same as -text).")
+    print()
+    print("  --invert         Invert text search. Show lines that do NOT")
+    print("                   contain the specified phrase.")
+    print()
+    print("  -i, --ignore-case Case-insensitive search for both -text and")
+    print("                   --sitepattern.")
     print()
     print("  -q, --quiet      Suppress all console output. Only the report file")
     print("                   is written. Requires -w.")
