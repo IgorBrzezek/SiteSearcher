@@ -70,10 +70,10 @@ Both `-text` and `--sitepattern` and `--exclude` support:
 
 ## Examples
 
-Search for 'janek' on a single page:
+Search for 'example' on a single page:
 
 ```bash
-python sitesearcher.py -site https://example.com -text janek
+python sitesearcher.py -site https://example.com -text example
 ```
 
 Search with wildcard, depth 2, with colors:
