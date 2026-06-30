@@ -2,7 +2,7 @@
 """
 SiteSearcher - Website phrase search tool.
 Author: Igor Brzezek
-Version: 0.0.1
+Version: 0.0.2
 GitHub: https://github.com/IgorBrzezek
 """
 
@@ -76,8 +76,14 @@ class SiteSearcher:
         self.pages_scanned = 0
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'SiteSearcher/0.0.1 (Python)'
+            'User-Agent': 'SiteSearcher/0.0.2 (Python)'
         })
+        self.exclude_patterns = []
+        if args.exclude:
+            for f in args.exclude.split(','):
+                f = f.strip()
+                if f:
+                    self.exclude_patterns.append(self.phrase_to_regex(f))
 
     def c(self, text, color_code):
         return Colors.colorize(text, color_code, self.args.color)
@@ -159,6 +165,18 @@ class SiteSearcher:
         result = bool(re.search(regex, url, self.re_flags()))
         return not result if negate else result
 
+    def url_matches_exclude(self, url):
+        if not self.exclude_patterns:
+            return False
+        filename = os.path.basename(urlparse(url).path)
+        if not filename:
+            return False
+        flags = self.re_flags()
+        for pattern in self.exclude_patterns:
+            if re.search(pattern, filename, flags):
+                return True
+        return False
+
     def crawl(self, url, depth, base_domain):
         if url in self.visited_urls:
             return
@@ -168,6 +186,11 @@ class SiteSearcher:
         if not self.url_matches_sitepattern(url):
             if self.args.debug:
                 self.info(f"Skipping URL (sitepattern mismatch): {url}")
+            return
+
+        if self.url_matches_exclude(url):
+            if self.args.debug:
+                self.info(f"Skipping URL (exclude pattern): {url}")
             return
 
         is_binary, ext = self.is_binary_url(url)
@@ -324,7 +347,7 @@ class SiteSearcher:
             with open(self.args.output, 'w', encoding='utf-8') as f:
                 f.write(f"SiteSearcher Report\n")
                 f.write(f"Author: Igor Brzezek\n")
-                f.write(f"Version: 0.0.1\n")
+                f.write(f"Version: 0.0.2\n")
                 f.write(f"{'=' * 50}\n")
                 f.write(f"Site: {self.args.site}\n")
                 f.write(f"Phrase: {self.args.text}\n")
@@ -363,6 +386,7 @@ def create_parser():
     parser.add_argument('--binsearch', action='store_true', help='Also search inside binary files')
     parser.add_argument('--imgsearch', action='store_true', help='Also search for phrase in images (OCR)')
     parser.add_argument('--sitepattern', type=str, help='URL pattern filter (* and ? wildcards)')
+    parser.add_argument('--exclude', type=str, help='Comma-separated filenames to exclude from search (* and ? wildcards)')
     parser.add_argument('--invert', action='store_true', help='Invert text search (show non-matching lines)')
     parser.add_argument('-i', '--ignore-case', action='store_true', dest='ignore_case', help='Case-insensitive search')
     parser.add_argument('-q', '--quiet', action='store_true', help='Suppress all console output (requires -w)')
@@ -372,7 +396,7 @@ def create_parser():
 
 
 def show_simple_help():
-    print("SiteSearcher v0.0.1 by Igor Brzezek")
+    print("SiteSearcher v0.0.2 by Igor Brzezek")
     print("GitHub: https://github.com/IgorBrzezek")
     print()
     print("Usage: python sitesearcher.py -site URL -text PHRASE [options]")
@@ -389,6 +413,7 @@ def show_simple_help():
     print("  --binsearch      Also search inside binary files")
     print("  --imgsearch      Also search for phrase in images (OCR)")
     print("  --sitepattern    URL pattern filter (*, ? wildcards)")
+    print("  --exclude FILES  Exclude filenames from search (*, ? wildcards, comma-separated)")
     print("  --invert         Invert text search (show non-matching lines)")
     print("  -i, --ignore-case Case-insensitive search")
     print("  -q, --quiet      Suppress all console output (requires -w)")
@@ -397,7 +422,7 @@ def show_simple_help():
 
 
 def show_detailed_help():
-    print("SiteSearcher v0.0.1 by Igor Brzezek")
+    print("SiteSearcher v0.0.2 by Igor Brzezek")
     print("GitHub: https://github.com/IgorBrzezek")
     print()
     print("DESCRIPTION")
@@ -444,11 +469,16 @@ def show_detailed_help():
     print("  --sitepattern    Filter pages by URL pattern. Supports * and ?")
     print("                   wildcards (same as -text).")
     print()
+    print("  --exclude FILES  Exclude specific filenames from crawling.")
+    print("                   Supports * and ? wildcards (same as -text).")
+    print("                   Multiple filenames separated by commas.")
+    print("                   Example: --exclude '*.pdf,*.zip,secret*'")
+    print()
     print("  --invert         Invert text search. Show lines that do NOT")
     print("                   contain the specified phrase.")
     print()
-    print("  -i, --ignore-case Case-insensitive search for both -text and")
-    print("                   --sitepattern.")
+    print("  -i, --ignore-case Case-insensitive search for -text,")
+    print("                   --sitepattern and --exclude.")
     print()
     print("  -q, --quiet      Suppress all console output. Only the report file")
     print("                   is written. Requires -w.")
@@ -468,6 +498,9 @@ def show_detailed_help():
     print()
     print("  Search with external domains allowed:")
     print("    python sitesearcher.py -site https://example.com -text 'hello' -externaldomains")
+    print()
+    print("  Search excluding certain file types:")
+    print("    python sitesearcher.py -site https://example.com -text 'cisco' --exclude '*.pdf,*.zip' --debug")
     print()
     print("NOTES")
     print("  - The script shows line number and character position for each match.")
